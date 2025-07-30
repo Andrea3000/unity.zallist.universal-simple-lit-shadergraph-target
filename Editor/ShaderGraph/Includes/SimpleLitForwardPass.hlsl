@@ -204,11 +204,8 @@ half4 frag(PackedVaryings packedInput) : SV_TARGET
     surface.albedo = AlphaModulate(surface.albedo, surface.alpha);
 #endif
 
-#if UNITY_VERSION >= 600000
-    #if defined(_DBUFFER)
-#else
-    #ifdef _DBUFFER
-#endif
+#if defined(_DBUFFER)
+
 
     ApplyDecalToSurfaceData(unpacked.positionCS, surface, inputData);
 #endif

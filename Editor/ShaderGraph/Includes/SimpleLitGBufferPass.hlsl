@@ -124,11 +124,8 @@ PackedVaryings vert(Attributes input)
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(unpacked);
     SurfaceDescription surfaceDescription = BuildSurfaceDescription(unpacked);
 
-#if UNITY_VERSION >= 202320
+    
     #if defined(_ALPHATEST_ON)
-#else
-    #if _ALPHATEST_ON
-#endif
         half alpha = surfaceDescription.Alpha;
         clip(alpha - surfaceDescription.AlphaClipThreshold);
     #elif _SURFACE_TYPE_TRANSPARENT
@@ -168,11 +165,8 @@ PackedVaryings vert(Attributes input)
         normalTS = surfaceDescription.NormalTS;
     #endif
 
-#if UNITY_VERSION >= 600000
-    #if defined(_DBUFFER)
-#else
-    #ifdef _DBUFFER
-#endif
+#if defined(_DBUFFER)
+
     // ApplyDecal needs modifiable values for metallic and occlusion
     // but they end up not being used, so feed them a throwaway value
     float throwaway = 0.0;

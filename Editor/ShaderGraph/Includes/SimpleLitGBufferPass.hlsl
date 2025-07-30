@@ -37,8 +37,32 @@ void InitializeInputData(Varyings input, SurfaceDescription surfaceDescription, 
 
     inputData.fogCoord = InitializeInputDataFog(float4(input.positionWS, 1.0), input.fogFactorAndVertexLight.x);
     inputData.vertexLighting = input.fogFactorAndVertexLight.yzw;
-
+    
+#if UNITY_VERSION < 202300
+#if defined(DYNAMICLIGHTMAP_ON)
+        inputData.bakedGI = SAMPLE_GI(input.staticLightmapUV, input.dynamicLightmapUV.xy, input.sh, inputData.normalWS);
+#else
+    inputData.bakedGI = SAMPLE_GI(input.staticLightmapUV, input.sh, inputData.normalWS);
+    #endif
+#elif UNITY_VERSION < 600000
+    #if defined(DYNAMICLIGHTMAP_ON)
+        inputData.bakedGI = SAMPLE_GI(input.staticLightmapUV, input.dynamicLightmapUV.xy, input.sh, inputData.normalWS);
+    #elif !defined(LIGHTMAP_ON) && (defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2))
+        inputData.bakedGI = SAMPLE_GI(input.sh,
+        GetAbsolutePositionWS(inputData.positionWS),
+        inputData.normalWS,
+        inputData.viewDirectionWS,
+        inputData.positionCS.xy);
+    #else
+        inputData.bakedGI = SAMPLE_GI(input.staticLightmapUV, input.sh, inputData.normalWS);
+    #endif
+#endif
+    
+    
     inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
+ #if UNITY_VERSION < 600000   
+    inputData.shadowMask = SAMPLE_SHADOWMASK(input.staticLightmapUV);
+ #endif
 
     #if defined(DEBUG_DISPLAY)
     #if defined(DYNAMICLIGHTMAP_ON)
@@ -49,12 +73,17 @@ void InitializeInputData(Varyings input, SurfaceDescription surfaceDescription, 
     #else
     inputData.vertexSH = input.sh;
     #endif
+    
+#if UNITY_VERSION >= 600000
     #if defined(USE_APV_PROBE_OCCLUSION)
         inputData.probeOcclusion = input.probeOcclusion;
     #endif
+#endif
+    
     #endif
 }
 
+#if UNITY_VERSION >= 600000
 void InitializeBakedGIData(Varyings input, inout InputData inputData)
 {
 #if defined(DYNAMICLIGHTMAP_ON)
@@ -73,6 +102,7 @@ void InitializeBakedGIData(Varyings input, inout InputData inputData)
     inputData.shadowMask = SAMPLE_SHADOWMASK(input.staticLightmapUV);
 #endif
 }
+#endif
 
 PackedVaryings vert(Attributes input)
 {
@@ -83,14 +113,22 @@ PackedVaryings vert(Attributes input)
     return packedOutput;
 }
 
-GBufferFragOutput frag(PackedVaryings packedInput)
+#if UNITY_VERSION >= 600010
+    GBufferFragOutput frag(PackedVaryings packedInput)
+#else
+    FragmentOutput frag(PackedVaryings packedInput)
+#endif
 {
     Varyings unpacked = UnpackVaryings(packedInput);
     UNITY_SETUP_INSTANCE_ID(unpacked);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(unpacked);
     SurfaceDescription surfaceDescription = BuildSurfaceDescription(unpacked);
 
+#if UNITY_VERSION >= 202320
     #if defined(_ALPHATEST_ON)
+#else
+    #if _ALPHATEST_ON
+#endif
         half alpha = surfaceDescription.Alpha;
         clip(alpha - surfaceDescription.AlphaClipThreshold);
     #elif _SURFACE_TYPE_TRANSPARENT
@@ -107,11 +145,13 @@ GBufferFragOutput frag(PackedVaryings packedInput)
 
     InputData inputData;
     InitializeInputData(unpacked, surfaceDescription, inputData);
+#if UNITY_VERSION >= 600000
     #ifdef VARYINGS_NEED_TEXCOORD0
         SETUP_DEBUG_TEXTURE_DATA(inputData, unpacked.texCoord0);
     #else
         SETUP_DEBUG_TEXTURE_DATA_NO_UV(inputData);
     #endif
+#endif
 
     //ifdef _SPECULAR_SETUP
     #ifdef _SPECULAR_COLOR
@@ -128,7 +168,11 @@ GBufferFragOutput frag(PackedVaryings packedInput)
         normalTS = surfaceDescription.NormalTS;
     #endif
 
-#if defined(_DBUFFER)
+#if UNITY_VERSION >= 600000
+    #if defined(_DBUFFER)
+#else
+    #ifdef _DBUFFER
+#endif
     // ApplyDecal needs modifiable values for metallic and occlusion
     // but they end up not being used, so feed them a throwaway value
     float throwaway = 0.0;
@@ -143,8 +187,10 @@ GBufferFragOutput frag(PackedVaryings packedInput)
         surfaceDescription.Smoothness);
 #endif
 
+#if UNITY_VERSION >= 600000
     InitializeBakedGIData(unpacked, inputData);
-    
+#endif
+
     // in SimpleLitForwardPass GlobalIllumination (and temporarily UniversalBlinnPhong) are called inside UniversalFragmentBlinnPhong
     // in Deferred rendering we store the sum of these values (and of emission as well) in the GBuffer
     //BRDFData brdfData;
@@ -172,5 +218,9 @@ GBufferFragOutput frag(PackedVaryings packedInput)
     half4 color = half4(inputData.bakedGI * surface.albedo + surface.emission, surface.alpha);
 
     //return BRDFDataToGbuffer(brdfData, inputData, surfaceDescription.Smoothness, surfaceDescription.Emission + color, surfaceDescription.Occlusion);
+#if UNITY_VERSION >= 600010
     return PackGBuffersSurfaceData(surface, inputData, color.rgb);
+#else
+    return SurfaceDataToGbuffer(surface, inputData, color.rgb, kLightingSimpleLit);
+#endif
 }

@@ -38,13 +38,7 @@ void InitializeInputData(Varyings input, SurfaceDescription surfaceDescription, 
 
     inputData.fogCoord = InitializeInputDataFog(float4(input.positionWS, 1.0), input.fogFactorAndVertexLight.x);
     inputData.vertexLighting = input.fogFactorAndVertexLight.yzw;
-#if defined(DYNAMICLIGHTMAP_ON)
-    inputData.bakedGI = SAMPLE_GI(input.staticLightmapUV, input.dynamicLightmapUV.xy, input.sh, inputData.normalWS);
-#else
-    inputData.bakedGI = SAMPLE_GI(input.staticLightmapUV, input.sh, inputData.normalWS);
-#endif
     inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
-    inputData.shadowMask = SAMPLE_SHADOWMASK(input.staticLightmapUV);
 
     #if defined(DEBUG_DISPLAY)
     #if defined(DYNAMICLIGHTMAP_ON)
@@ -55,7 +49,33 @@ void InitializeInputData(Varyings input, SurfaceDescription surfaceDescription, 
     #else
     inputData.vertexSH = input.sh;
     #endif
+    
+    #if defined(USE_APV_PROBE_OCCLUSION)
+    inputData.probeOcclusion = input.probeOcclusion;
     #endif
+
+    inputData.positionCS = input.positionCS;
+    
+#endif
+}
+
+void InitializeBakedGIData(Varyings input, inout InputData inputData)
+{
+#if defined(DYNAMICLIGHTMAP_ON)
+    inputData.bakedGI = SAMPLE_GI(input.staticLightmapUV, input.dynamicLightmapUV.xy, input.sh, inputData.normalWS);
+    inputData.shadowMask = SAMPLE_SHADOWMASK(input.staticLightmapUV);
+#elif !defined(LIGHTMAP_ON) && (defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2))
+    inputData.bakedGI = SAMPLE_GI(input.sh,
+        GetAbsolutePositionWS(inputData.positionWS),
+        inputData.normalWS,
+        inputData.viewDirectionWS,
+        input.positionCS.xy,
+        input.probeOcclusion,
+        inputData.shadowMask);
+#else
+    inputData.bakedGI = SAMPLE_GI(input.staticLightmapUV, input.sh, inputData.normalWS);
+    inputData.shadowMask = SAMPLE_SHADOWMASK(input.staticLightmapUV);
+#endif
 }
 
 PackedVaryings vert(Attributes input)
@@ -115,8 +135,11 @@ half4 frag(PackedVaryings packedInput) : SV_TARGET
 
     InputData inputData;
     InitializeInputData(unpacked, surfaceDescription, inputData);
-    // TODO: Mip debug modes would require this, open question how to do this on ShaderGraph.
-    //SETUP_DEBUG_TEXTURE_DATA(inputData, unpacked.texCoord1.xy, _MainTex);
+    #ifdef VARYINGS_NEED_TEXCOORD0
+        SETUP_DEBUG_TEXTURE_DATA(inputData, unpacked.texCoord0);
+    #else
+        SETUP_DEBUG_TEXTURE_DATA_NO_UV(inputData);
+    #endif
 
     //#ifdef _SPECULAR_SETUP
     #ifdef _SPECULAR_COLOR
@@ -148,9 +171,11 @@ half4 frag(PackedVaryings packedInput) : SV_TARGET
     surface.albedo = AlphaModulate(surface.albedo, surface.alpha);
 #endif
 
-#ifdef _DBUFFER
+#if defined(_DBUFFER)
     ApplyDecalToSurfaceData(unpacked.positionCS, surface, inputData);
 #endif
+    
+    InitializeBakedGIData(unpacked, inputData);
 
     half4 color = UniversalFragmentBlinnPhong(inputData, surface);
 
